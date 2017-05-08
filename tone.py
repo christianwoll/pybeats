@@ -7,44 +7,66 @@ import sounddevice as sd
 # wf - waveform
 
 fs = 44100
+
 sd.default.samplerate = fs 
 sd.default.channels = 1
 
-def wave(freq, duration, volume=1, form=None, decay=1):
-    if form is None: form = lambda x: np.sin(2*np.pi * x)
-    if freq is None: return np.zeros(int(duration * fs))
+class Wave:
+    sine = lambda x: np.sin(2*np.pi * x)
 
-    period = int(fs / freq)
-    single = np.fromfunction(lambda i: form(i/period), (period,))
-    tone = np.tile(single, int(freq * duration + 1))
+    def __init__(self, freq=None, amp=0.5, shape=None):
+        self.freq = freq
+        self.amp = amp
+        self.shape = shape if not shape is None else self.sine
 
-    return tone
-    
-def play(wf):
-    sd.play(wf)
-    time.sleep(len(wf) / fs)
-    sd.stop()
+    def array(self, duration):
+        if self.freq is None: return np.zeros(int(duration * fs))
 
-key = [261.625*2**(n/12) for n in range(12)]
+        period = int(fs / self.freq)
+        single = np.fromfunction(lambda i: self.amp * self.shape(i/period), (period,))
+        wf = np.tile(single, int(self.freq * duration + 1))
 
-def seq(notes, beat, form=None):
-    freqs = [None if n is None else key[n%12]*2**(n//12) for n in notes]
-    return np.concatenate([wave(f, beat, form) for f in freqs])
+        return wf 
+        
+class Song:
+    def __init__(self, tempo=0.125, base_freq=440):
+        self.tempo = tempo 
+        self.key = [base_freq*2**(n/12) for n in range(12)]
+        self.arr = np.array([0.0])  
 
-def chord(notes, beat):
-    return merge(*[seq([n], beat) for n in notes])
+    def play(self):
+        sd.play(self.arr)
+        time.sleep(len(self.arr) / fs)
+        sd.stop()
 
-def merge(*wf_arr):
-    M = max([len(wf) for wf in wf_arr])
-    WF_arr = [wf + [0.0] * (M - len(wf)) for wf in wf_arr]
-    return [np.mean(v) for v in zip(*WF_arr)]
-    
-beat = 0.2
-song = np.array([])
+    def add(self, seq, beat, amp=0.5, shape=Wave.sine, octave=0):
+        seq = [None if n == '' else n + 12*octave for n in seq]
 
-song = np.concatenate((song, seq([6,8,None,10,8,None,6,8], beat)))
-song = np.concatenate((song, seq([5,6,None,10,6,None,5,6], beat)))
-song = np.concatenate((song, seq([3,6,None,10,3,None,5,3], beat)))
-song = np.concatenate((song, seq([11,10,None,6,10,None,6,11], beat)))
-song = np.tile(song, 4)
-play(song)
+        freqs = [None if n is None else self.key[n%12]*2**(n//12) for n in seq]
+        waves = [Wave(f, amp, shape) for f in freqs]
+        newarr = np.concatenate([wave.array(self.tempo) for wave in waves])
+
+        offset = int(beat * self.tempo * fs)
+        newarr = np.concatenate((np.zeros(offset), newarr))
+
+        if len(self.arr) < len(newarr):
+            self.arr = np.concatenate((self.arr, np.zeros(len(newarr) - len(self.arr))))
+        if len(newarr) < len(self.arr):
+            newarr = np.concatenate((newarr, np.zeros(len(self.arr) - len(newarr))))
+        
+        self.arr = (self.arr + newarr)
+                    
+    def loop(self, num):
+        self.arr = np.tile(self.arr, num)
+
+song = Song(0.2, 261.625)
+
+melody = [6,8,6,10,8,10,6,8]+[5,6,5,10,6,10,5,6]+[3,6,3,10,3,10,5,3]+[11,10,11,6,10,11,6,11]
+song.add(melody, 0)
+
+bass = [6,'',6,'',6,'',6,'']+[5,'',5,'',5,'',5,'']+[3,'',3,'',3,'',3,'']+[-1,'',-1,'',-1,'',-1]
+song.add(bass, 0, 0.2, octave=-2)
+song.add(bass, 1, 0.2, octave=-1)
+
+song.loop(2)
+song.play()
