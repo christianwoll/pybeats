@@ -2,19 +2,17 @@ import time
 import numpy as np
 import sounddevice as sd
 
-# Dictionary:
-# fs - F-something per second
-# wf - waveform
-
 fs = 44100
 
 sd.default.samplerate = fs 
 sd.default.channels = 1
 
 class Wave:
+    # Functions go from -1 to 1
     sine = lambda x: np.sin(2*np.pi * x)
+    bit8 = lambda x: np.round(np.sin(2*np.pi * x) * 4) / 4
 
-    def __init__(self, freq=None, amp=0.5, shape=None):
+    def __init__(self, freq, amp, shape):
         self.freq = freq
         self.amp = amp
         self.shape = shape if not shape is None else self.sine
@@ -29,9 +27,12 @@ class Wave:
         return wf 
         
 class Song:
-    def __init__(self, tempo=0.125, base_freq=440):
+    roct = 2
+    steps = 12
+
+    def __init__(self, tempo, fbase):
         self.tempo = tempo 
-        self.key = [base_freq*2**(n/12) for n in range(12)]
+        self.key = [fbase * self.roct**(n/self.steps) for n in range(self.steps)]
         self.arr = np.array([0.0])  
 
     def play(self):
@@ -40,9 +41,9 @@ class Song:
         sd.stop()
 
     def add(self, seq, beat, amp=0.5, shape=Wave.sine, octave=0):
-        seq = [None if n == '' else n + 12*octave for n in seq]
+        seq = [None if n == '' else n + self.steps * octave for n in seq]
 
-        freqs = [None if n is None else self.key[n%12]*2**(n//12) for n in seq]
+        freqs = [None if n is None else self.key[n%self.steps] * self.roct**(n//self.steps) for n in seq]
         waves = [Wave(f, amp, shape) for f in freqs]
         newarr = np.concatenate([wave.array(self.tempo) for wave in waves])
 
@@ -59,14 +60,23 @@ class Song:
     def loop(self, num):
         self.arr = np.tile(self.arr, num)
 
-song = Song(0.2, 261.625)
+roct = 2
+steps = 12
 
-melody = [6,8,6,10,8,10,6,8]+[5,6,5,10,6,10,5,6]+[3,6,3,10,3,10,5,3]+[11,10,11,6,10,11,6,11]
-song.add(melody, 0)
+tempo = 0.2
+fbase = 200
 
-bass = [6,'',6,'',6,'',6,'']+[5,'',5,'',5,'',5,'']+[3,'',3,'',3,'',3,'']+[-1,'',-1,'',-1,'',-1]
-song.add(bass, 0, 0.2, octave=-2)
-song.add(bass, 1, 0.2, octave=-1)
+key = [fbase * roct**(n/steps) for n in range(steps)]
 
-song.loop(2)
-song.play()
+
+
+seq = [6,8,6,10,8,10,6,8]+[5,6,5,10,6,10,5,6]+[3,6,3,10,3,10,5,3]+[11,10,11,6,10,11,6,11]
+
+seq = [None if n == '' else n for n in seq]
+freqs = [None if n is None else key[n%steps] * roct**(n//steps) for n in seq]
+waves = [Wave(f, 0.5, Wave.sine) for f in freqs]
+arr = np.concatenate([wave.array(tempo) for wave in waves])
+
+sd.play(arr)
+time.sleep(len(arr) / fs)
+sd.stop()
